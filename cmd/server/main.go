@@ -12,49 +12,39 @@ import (
 )
 
 func main() {
+    // Load config
     cfg, err := config.LoadConfig()
     if err != nil {
         log.Fatal(err)
     }
 
+    // Open (and migrate) DB
     db, err := datastore.OpenDB(cfg.DBPath)
     if err != nil {
         log.Fatal(err)
     }
     defer db.Close()
 
+    // Initialize rate limiter & telemetry
     rateLimiter := limiter.NewIPRateLimiter(cfg.RateLimit)
     telemetry.Init()
 
+    // Build router
     mux := http.NewServeMux()
-
-    // Public: POST /shorten
-    mux.Handle("/shorten", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if r.Method == http.MethodPost {
-            api.ShortenHandler(db).ServeHTTP(w, r)
-            return
-        }
-        http.NotFound(w, r)
-    }))
-
-    // Shared: GET for redirect and DELETE for revocation on /
-    mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        switch r.Method {
-        case http.MethodGet:
-            api.RedirectHandler(db).ServeHTTP(w, r)
-        case http.MethodDelete:
-            api.AuthMiddleware(cfg, api.RevokeHandler(db, cfg.APIKeys)).ServeHTTP(w, r)
-        default:
-            http.NotFound(w, r)
-        }
-    })
-
-    // Public: health and metrics
+    mux.Handle("/shorten", api.ShortenHandler(db))
+    mux.Handle("/{shortcode}", api.RedirectHandler(db))
+    mux.Handle("/"+cfg.APIKeys[0], api.RevokeHandler(db, cfg.APIKeys)) // pattern; see note below
     mux.Handle("/health", api.HealthHandler())
-    mux.Handle("/metrics", api.MetricsHandler())
+    mux.Handle("/metrics", api.MetricsHandler(db))
 
-    // Apply rate limiting and logging globally
-    handler := rateLimiter.Middleware(api.LoggingMiddleware(mux))
+    // Apply middleware stack: recovery → logging → auth → rate limit
+    handler := rateLimiter.Middleware(
+        api.RecoveryMiddleware(
+            api.LoggingMiddleware(
+                api.AuthMiddleware(cfg, mux),
+            ),
+        ),
+    )
 
     log.Printf("Starting server on %s", cfg.Port)
     if err := http.ListenAndServe(cfg.Port, handler); err != nil {

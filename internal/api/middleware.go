@@ -1,12 +1,13 @@
 package api
 
 import (
-    "github.com/valorm/snapurl/internal/config"
     "log"
     "net/http"
+
+    "github.com/valorm/snapurl/internal/config"
 )
 
-// LoggingMiddleware logs request and response details
+// LoggingMiddleware logs each request start and end.
 func LoggingMiddleware(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         log.Printf("Started %s %s", r.Method, r.URL.Path)
@@ -15,7 +16,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
     })
 }
 
-// AuthMiddleware validates API keys for admin actions
+// AuthMiddleware enforces X-API-Key for protected routes.
 func AuthMiddleware(cfg *config.Config, next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         apiKey := r.Header.Get("X-API-Key")
@@ -27,7 +28,20 @@ func AuthMiddleware(cfg *config.Config, next http.Handler) http.Handler {
     })
 }
 
-// contains checks if a string is in a slice
+// RecoveryMiddleware recovers from panics and returns 500.
+func RecoveryMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        defer func() {
+            if err := recover(); err != nil {
+                log.Printf("Recovered from panic: %v", err)
+                http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+            }
+        }()
+        next.ServeHTTP(w, r)
+    })
+}
+
+// contains checks if a string is in a slice.
 func contains(slice []string, item string) bool {
     for _, s := range slice {
         if s == item {

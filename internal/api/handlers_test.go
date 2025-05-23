@@ -1,15 +1,16 @@
 package api
 
 import (
-    "bytes"
     "database/sql"
     "encoding/json"
     "net/http"
     "net/http/httptest"
+    "strings"
     "testing"
+    "time"
 
+    "github.com/valorm/snapurl/internal/config"
     "github.com/valorm/snapurl/internal/datastore"
-    "github.com/valorm/snapurl/internal/service"
     _ "github.com/mattn/go-sqlite3"
 )
 
@@ -24,97 +25,88 @@ func setupTestDB(t *testing.T) *sql.DB {
     return db
 }
 
-func TestShortenHandler(t *testing.T) {
+func TestFullWorkflow(t *testing.T) {
     db := setupTestDB(t)
     defer db.Close()
 
-    handler := ShortenHandler(db)
-    body := map[string]string{"url": "https://example.com"}
-    buf, _ := json.Marshal(body)
-    req := httptest.NewRequest(http.MethodPost, "/shorten", bytes.NewBuffer(buf))
+    // Fake config for auth
+    cfg := &config.Config{
+        Port:      ":8080",
+        DBPath:    ":memory:",
+        RateLimit: 10,
+        APIKeys:   []string{"test-key"},
+    }
+
+    // 1) Create
+    createBody := `{"url":"https://example.com","expiry":"` +
+        time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}`
+    req := httptest.NewRequest(http.MethodPost, "/shorten", strings.NewReader(createBody))
     req.Header.Set("Content-Type", "application/json")
     rr := httptest.NewRecorder()
-    handler.ServeHTTP(rr, req)
-
+    ShortenHandler(db).ServeHTTP(rr, req)
     if rr.Code != http.StatusCreated {
-        t.Fatalf("want 201; got %d", rr.Code)
+        t.Fatalf("Create: want 201, got %d", rr.Code)
     }
-    var resp map[string]string
-    _ = json.NewDecoder(rr.Body).Decode(&resp)
-    if resp["shortcode"] == "" {
-        t.Fatal("missing shortcode")
+    var crResp struct{ Shortcode string }
+    if err := json.NewDecoder(rr.Body).Decode(&crResp); err != nil {
+        t.Fatalf("Create decode: %v", err)
     }
-}
+    code := crResp.Shortcode
 
-func TestRedirectHandler(t *testing.T) {
-    db := setupTestDB(t)
-    defer db.Close()
-
-    link, _ := service.CreateLink(db, "https://example.com", nil)
-    req := httptest.NewRequest(http.MethodGet, "/"+link.Shortcode, nil)
-    rr := httptest.NewRecorder()
-    RedirectHandler(db).ServeHTTP(rr, req)
-
+    // 2) Redirect
+    rr = httptest.NewRecorder()
+    RedirectHandler(db).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/"+code, nil))
     if rr.Code != http.StatusFound {
-        t.Errorf("Expected 302, got %d", rr.Code)
+        t.Errorf("Redirect: want 302, got %d", rr.Code)
     }
-    if loc := rr.Header().Get("Location"); loc != link.TargetURL {
-        t.Errorf("Redirect to %q; got %q", link.TargetURL, loc)
+    if loc := rr.Header().Get("Location"); loc != "https://example.com" {
+        t.Errorf("Redirect Location: want https://example.com, got %q", loc)
     }
-}
 
-func TestRevokeHandlerAndRevokedRedirect(t *testing.T) {
-    db := setupTestDB(t)
-    defer db.Close()
-
-    link, _ := service.CreateLink(db, "https://revokable.com", nil)
-    _ = service.RevokeLink(db, link.Shortcode)
-
-    req := httptest.NewRequest(http.MethodGet, "/"+link.Shortcode, nil)
-    rr := httptest.NewRecorder()
-    RedirectHandler(db).ServeHTTP(rr, req)
-
-    if rr.Code != http.StatusGone {
-        t.Errorf("Expected 410 Gone; got %d", rr.Code)
-    }
-}
-
-func TestRevokeHandlerAPI(t *testing.T) {
-    db := setupTestDB(t)
-    defer db.Close()
-
-    link, _ := service.CreateLink(db, "https://torevoke.com", nil)
-    req := httptest.NewRequest(http.MethodDelete, "/"+link.Shortcode, nil)
-    req.Header.Set("X-API-Key", "default_key_1")
-    rr := httptest.NewRecorder()
-    RevokeHandler(db, []string{"default_key_1"}).ServeHTTP(rr, req)
-
+    // 3) Revoke
+    req = httptest.NewRequest(http.MethodDelete, "/"+code, nil)
+    req.Header.Set("X-API-Key", "test-key")
+    rr = httptest.NewRecorder()
+    RevokeHandler(db, cfg.APIKeys).ServeHTTP(rr, req)
     if rr.Code != http.StatusNoContent {
-        t.Errorf("Expected 204 No Content; got %d", rr.Code)
+        t.Errorf("Revoke: want 204, got %d", rr.Code)
     }
-}
 
-func TestMetricsHandler(t *testing.T) {
-    db := setupTestDB(t)
-    defer db.Close()
+    // 4) Access after revoke
+    rr = httptest.NewRecorder()
+    RedirectHandler(db).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/"+code, nil))
+    if rr.Code != http.StatusGone {
+        t.Errorf("Post-revoke: want 410, got %d", rr.Code)
+    }
 
-    // create and redirect
-    link, _ := service.CreateLink(db, "https://example.com", nil)
-    _ = service.IncrementHits(db, link.Shortcode)
-
-    req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-    rr := httptest.NewRecorder()
-    MetricsHandler(db).ServeHTTP(rr, req)
-
+    // 5) Metrics
+    rr = httptest.NewRecorder()
+    MetricsHandler(db).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
     if rr.Code != http.StatusOK {
-        t.Fatalf("want 200; got %d", rr.Code)
+        t.Errorf("Metrics: want 200, got %d", rr.Code)
     }
-    var met map[string]uint64
-    _ = json.NewDecoder(rr.Body).Decode(&met)
-    if met["urls_created"] < 1 {
-        t.Errorf("urls_created = %d; want >=1", met["urls_created"])
+    var m map[string]uint64
+    if err := json.NewDecoder(rr.Body).Decode(&m); err != nil {
+        t.Fatalf("Metrics decode: %v", err)
     }
-    if met["redirects_served"] < 1 {
-        t.Errorf("redirects_served = %d; want >=1", met["redirects_served"])
+    if m["urls_created"] != 1 {
+        t.Errorf("urls_created: want 1, got %d", m["urls_created"])
+    }
+    if m["redirects_served"] != 1 {
+        t.Errorf("redirects_served: want 1, got %d", m["redirects_served"])
+    }
+
+    // 6) Health
+    rr = httptest.NewRecorder()
+    HealthHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/health", nil))
+    if rr.Code != http.StatusOK {
+        t.Errorf("Health: want 200, got %d", rr.Code)
+    }
+    var h map[string]string
+    if err := json.NewDecoder(rr.Body).Decode(&h); err != nil {
+        t.Fatalf("Health decode: %v", err)
+    }
+    if h["status"] != "ok" {
+        t.Errorf("Health status: want ok, got %q", h["status"])
     }
 }
