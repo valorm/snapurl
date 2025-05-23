@@ -1,7 +1,7 @@
 package main
 
 import (
-    "database/sql"
+ 
     "github.com/valorm/snapurl/internal/api"
     "github.com/valorm/snapurl/internal/config"
     "github.com/valorm/snapurl/internal/datastore"

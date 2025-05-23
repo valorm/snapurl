@@ -3,7 +3,6 @@ package api
 import (
     "database/sql"
     "encoding/json"
-    "github.com/valorm/snapurl/internal/service"
     "net/http"
     "strings"
 )

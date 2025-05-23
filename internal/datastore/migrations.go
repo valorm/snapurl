@@ -2,38 +2,45 @@ package datastore
 
 import (
     "database/sql"
+    "embed"
     "fmt"
-    "os"
+    "io/fs"
     "path/filepath"
     "sort"
     "strings"
 )
 
-// RunMigrations applies all pending .sql files in the migrations directory
+// Embed all SQL files under migrations/
+//
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
+
+// RunMigrations applies all pending .sql files in order.
 func RunMigrations(db *sql.DB) error {
     const migrationsDir = "migrations"
 
-    entries, err := os.ReadDir(migrationsDir)
+    entries, err := fs.ReadDir(migrationsFS, migrationsDir)
     if err != nil {
         return fmt.Errorf("read migrations dir: %w", err)
     }
 
-    // Collect and sort .sql filenames
-    var files []string
-    for _, e := range entries {
-        if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
-            files = append(files, e.Name())
-        }
-    }
-    sort.Strings(files)
+    // Sort by filename so versions run in order
+    sort.Slice(entries, func(i, j int) bool {
+        return entries[i].Name() < entries[j].Name()
+    })
 
-    // Execute each migration in order
-    for _, name := range files {
+    for _, entry := range entries {
+        name := entry.Name()
+        if !strings.HasSuffix(name, ".sql") {
+            continue
+        }
+
         path := filepath.Join(migrationsDir, name)
-        sqlBytes, err := os.ReadFile(path)
+        sqlBytes, err := migrationsFS.ReadFile(path)
         if err != nil {
             return fmt.Errorf("read migration %s: %w", name, err)
         }
+
         if _, err := db.Exec(string(sqlBytes)); err != nil {
             return fmt.Errorf("exec migration %s: %w", name, err)
         }
