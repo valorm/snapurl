@@ -8,8 +8,10 @@ import (
     "time"
 
     "github.com/valorm/snapurl/internal/service"
+    "github.com/valorm/snapurl/internal/telemetry"
 )
 
+// ShortenHandler handles POST /shorten
 func ShortenHandler(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var req struct {
@@ -38,6 +40,7 @@ func ShortenHandler(db *sql.DB) http.HandlerFunc {
     }
 }
 
+// RedirectHandler handles GET /{shortcode}
 func RedirectHandler(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         code := strings.TrimPrefix(r.URL.Path, "/")
@@ -57,6 +60,7 @@ func RedirectHandler(db *sql.DB) http.HandlerFunc {
     }
 }
 
+// RevokeHandler handles DELETE /{shortcode}
 func RevokeHandler(db *sql.DB, apiKeys []string) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         apiKey := r.Header.Get("X-API-Key")
@@ -80,16 +84,23 @@ func RevokeHandler(db *sql.DB, apiKeys []string) http.HandlerFunc {
     }
 }
 
+// MetricsHandler handles GET /metrics
+func MetricsHandler(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        metrics, err := telemetry.GetMetrics(db)
+        if err != nil {
+            http.Error(w, "Failed to fetch metrics", http.StatusInternalServerError)
+            return
+        }
+        json.NewEncoder(w).Encode(metrics)
+    }
+}
+
+// HealthHandler handles GET /health
 func HealthHandler() http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-    }
-}
-
-func MetricsHandler() http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        w.WriteHeader(http.StatusNotImplemented)
-        w.Write([]byte(`{"error":"Not implemented"}`))
     }
 }
