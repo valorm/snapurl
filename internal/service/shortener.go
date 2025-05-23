@@ -6,6 +6,7 @@ import (
     "time"
 
     "github.com/valorm/snapurl/internal/models"
+    "github.com/valorm/snapurl/internal/telemetry"
     "github.com/valorm/snapurl/pkg/util"
 )
 
@@ -58,6 +59,8 @@ func CreateLink(db *sql.DB, targetURL string, expiry *time.Time) (models.Link, e
     link.ExpiresAt = expiresAt
     link.Revoked = false
 
+    // increment metrics
+    telemetry.Increment("urls_created")
     return link, nil
 }
 
@@ -101,6 +104,8 @@ func IncrementHits(db *sql.DB, code string) error {
     if rows == 0 {
         return fmt.Errorf("no link found to increment")
     }
+
+    telemetry.Increment("redirects_served")
     return nil
 }
 
