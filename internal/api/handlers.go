@@ -21,10 +21,15 @@ func ShortenHandler(db *sql.DB) http.HandlerFunc {
             http.Error(w, "Invalid request body", http.StatusBadRequest)
             return
         }
+
+        // Trim spaces from the URL input
+        req.URL = strings.TrimSpace(req.URL)
+
         if req.URL == "" {
             http.Error(w, "Missing 'url' field", http.StatusBadRequest)
             return
         }
+
         var expiry *time.Time
         if !req.Expiry.IsZero() {
             expiry = &req.Expiry
@@ -49,9 +54,18 @@ func RedirectHandler(db *sql.DB) http.HandlerFunc {
             http.NotFound(w, r)
             return
         }
-        // TODO: call service.ResolveLink and redirect
-        w.WriteHeader(http.StatusNotImplemented)
-        w.Write([]byte(`{"error":"Not implemented"}`))
+        // Resolve link
+        link, err := service.ResolveLink(db, code)
+        if err != nil {
+            http.NotFound(w, r)
+            return
+        }
+        // Increment hits
+        if err := service.IncrementHits(db, code); err != nil {
+            // Log error but continue
+        }
+        // Redirect
+        http.Redirect(w, r, link.TargetURL, http.StatusFound)
     }
 }
 
