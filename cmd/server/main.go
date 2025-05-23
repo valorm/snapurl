@@ -1,14 +1,14 @@
 package main
 
 import (
- 
+    "log"
+    "net/http"
+
     "github.com/valorm/snapurl/internal/api"
     "github.com/valorm/snapurl/internal/config"
     "github.com/valorm/snapurl/internal/datastore"
     "github.com/valorm/snapurl/internal/limiter"
     "github.com/valorm/snapurl/internal/telemetry"
-    "log"
-    "net/http"
 )
 
 func main() {
@@ -28,36 +28,33 @@ func main() {
 
     mux := http.NewServeMux()
 
-    // NOTE: ServeMux doesn't support method + path pattern matching,
-    // so you might want to handle method inside handlers or use a router lib.
-    mux.HandleFunc("/shorten", func(w http.ResponseWriter, r *http.Request) {
+    // Public: POST /shorten
+    mux.Handle("/shorten", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         if r.Method == http.MethodPost {
             api.ShortenHandler(db).ServeHTTP(w, r)
             return
         }
         http.NotFound(w, r)
-    })
+    }))
 
-    // Use wildcard route for redirect and revoke: match all other paths
+    // Shared: GET for redirect and DELETE for revocation on /
     mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
         switch r.Method {
         case http.MethodGet:
             api.RedirectHandler(db).ServeHTTP(w, r)
         case http.MethodDelete:
-            api.RevokeHandler(db, cfg.APIKeys).ServeHTTP(w, r)
+            api.AuthMiddleware(cfg, api.RevokeHandler(db, cfg.APIKeys)).ServeHTTP(w, r)
         default:
             http.NotFound(w, r)
         }
     })
 
-    mux.HandleFunc("/health", api.HealthHandler())
-    mux.HandleFunc("/metrics", api.MetricsHandler())
+    // Public: health and metrics
+    mux.Handle("/health", api.HealthHandler())
+    mux.Handle("/metrics", api.MetricsHandler())
 
-    handler := rateLimiter.Middleware(
-        api.LoggingMiddleware(
-            api.AuthMiddleware(cfg, mux),
-        ),
-    )
+    // Apply rate limiting and logging globally
+    handler := rateLimiter.Middleware(api.LoggingMiddleware(mux))
 
     log.Printf("Starting server on %s", cfg.Port)
     if err := http.ListenAndServe(cfg.Port, handler); err != nil {

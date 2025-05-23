@@ -5,33 +5,51 @@ import (
     "encoding/json"
     "net/http"
     "strings"
+    "time"
+
+    "github.com/valorm/snapurl/internal/service"
 )
 
 // ShortenHandler handles POST /shorten
 func ShortenHandler(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        // TODO: Parse JSON body {url, expiry}
-        // TODO: Call service.CreateLink()
-        // TODO: Return {shortcode} in JSON 201
-
-        w.WriteHeader(http.StatusNotImplemented)
-        w.Write([]byte(`{"error":"Not implemented"}`))
+        var req struct {
+            URL    string    `json:"url"`
+            Expiry time.Time `json:"expiry,omitempty"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            http.Error(w, "Invalid request body", http.StatusBadRequest)
+            return
+        }
+        if req.URL == "" {
+            http.Error(w, "Missing 'url' field", http.StatusBadRequest)
+            return
+        }
+        var expiry *time.Time
+        if !req.Expiry.IsZero() {
+            expiry = &req.Expiry
+        }
+        link, err := service.CreateLink(db, req.URL, expiry)
+        if err != nil {
+            http.Error(w, "Failed to create link", http.StatusInternalServerError)
+            return
+        }
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(map[string]string{"shortcode": link.Shortcode})
     }
 }
 
 // RedirectHandler handles GET /{shortcode}
 func RedirectHandler(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        // Extract shortcode from path (assumes "/{shortcode}" pattern)
-        shortcode := strings.TrimPrefix(r.URL.Path, "/")
-        if shortcode == "" {
+        // Extract shortcode from path
+        code := strings.TrimPrefix(r.URL.Path, "/")
+        if code == "" {
             http.NotFound(w, r)
             return
         }
-
-        // TODO: Call service.ResolveLink()
-        // TODO: 302 redirect or 404/410 if invalid
-
+        // TODO: call service.ResolveLink and redirect
         w.WriteHeader(http.StatusNotImplemented)
         w.Write([]byte(`{"error":"Not implemented"}`))
     }
@@ -40,10 +58,7 @@ func RedirectHandler(db *sql.DB) http.HandlerFunc {
 // RevokeHandler handles DELETE /{shortcode}
 func RevokeHandler(db *sql.DB, apiKeys []string) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        // TODO: Validate API key from header
-        // TODO: Call service.RevokeLink()
-        // TODO: Return 204 No Content
-
+        // TODO: validate API key header, call service.RevokeLink
         w.WriteHeader(http.StatusNotImplemented)
         w.Write([]byte(`{"error":"Not implemented"}`))
     }
@@ -61,7 +76,7 @@ func HealthHandler() http.HandlerFunc {
 // MetricsHandler handles GET /metrics
 func MetricsHandler() http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        // TODO: Return JSON with counters (urls_created, redirects_served, active_links)
+        // TODO: return JSON or Prometheus metrics
         w.Header().Set("Content-Type", "application/json")
         w.WriteHeader(http.StatusNotImplemented)
         w.Write([]byte(`{"error":"Not implemented"}`))
