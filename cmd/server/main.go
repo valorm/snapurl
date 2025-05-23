@@ -1,44 +1,66 @@
 package main
 
 import (
-    "log"
-    "net/http"
-
+    "database/sql"
+    "github.com/valorm/snapurl/internal/api"
     "github.com/valorm/snapurl/internal/config"
     "github.com/valorm/snapurl/internal/datastore"
-    "github.com/valorm/snapurl/internal/api"
     "github.com/valorm/snapurl/internal/limiter"
+    "github.com/valorm/snapurl/internal/telemetry"
+    "log"
+    "net/http"
 )
 
 func main() {
-    // 1) Load configuration
     cfg, err := config.LoadConfig()
     if err != nil {
-        log.Fatalf("failed to load config: %v", err)
+        log.Fatal(err)
     }
 
-    // 2) Open and migrate the database
     db, err := datastore.OpenDB(cfg.DBPath)
     if err != nil {
-        log.Fatalf("failed to open database: %v", err)
+        log.Fatal(err)
     }
     defer db.Close()
 
-    // 3) Setup Rate Limiter (e.g. 2 requests/sec per IP)
-    rateLimiter := limiter.NewIPRateLimiter(2)
+    rateLimiter := limiter.NewIPRateLimiter(cfg.RateLimit)
+    telemetry.Init()
 
-    // 4) Setup HTTP mux and routes
     mux := http.NewServeMux()
-    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-        w.WriteHeader(http.StatusOK)
-        w.Write([]byte("OK"))
-    })
-    mux.HandleFunc("/shorten", api.ShortenHandler)        // POST
-    mux.HandleFunc("/", api.RedirectHandler)              // GET /{shortcode}
 
-    // 5) Start server with rate-limiting middleware
-    log.Printf("starting server on %s", cfg.Port)
-    if err := http.ListenAndServe(cfg.Port, rateLimiter.Middleware(mux)); err != nil {
-        log.Fatalf("server error: %v", err)
+    // NOTE: ServeMux doesn't support method + path pattern matching,
+    // so you might want to handle method inside handlers or use a router lib.
+    mux.HandleFunc("/shorten", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method == http.MethodPost {
+            api.ShortenHandler(db).ServeHTTP(w, r)
+            return
+        }
+        http.NotFound(w, r)
+    })
+
+    // Use wildcard route for redirect and revoke: match all other paths
+    mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        switch r.Method {
+        case http.MethodGet:
+            api.RedirectHandler(db).ServeHTTP(w, r)
+        case http.MethodDelete:
+            api.RevokeHandler(db, cfg.APIKeys).ServeHTTP(w, r)
+        default:
+            http.NotFound(w, r)
+        }
+    })
+
+    mux.HandleFunc("/health", api.HealthHandler())
+    mux.HandleFunc("/metrics", api.MetricsHandler())
+
+    handler := rateLimiter.Middleware(
+        api.LoggingMiddleware(
+            api.AuthMiddleware(cfg, mux),
+        ),
+    )
+
+    log.Printf("Starting server on %s", cfg.Port)
+    if err := http.ListenAndServe(cfg.Port, handler); err != nil {
+        log.Fatal(err)
     }
 }
