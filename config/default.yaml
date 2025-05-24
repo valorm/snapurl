@@ -1,6 +1,6 @@
 # config/default.yaml
 port: ":8080"
-db_path: "data/snapurl.db"
+db_path: "/data/snapurl.db"
 rate_limit: 100
 api_keys:
   - "default_key_1"

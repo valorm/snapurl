@@ -12,8 +12,13 @@ import (
 )
 
 // ShortenHandler handles POST /shorten
-func ShortenHandler(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
+func ShortenHandler(db *sql.DB) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            http.NotFound(w, r)
+            return
+        }
+
         var req struct {
             URL    string    `json:"url"`
             Expiry time.Time `json:"expiry,omitempty"`
@@ -37,12 +42,16 @@ func ShortenHandler(db *sql.DB) http.HandlerFunc {
         w.Header().Set("Content-Type", "application/json")
         w.WriteHeader(http.StatusCreated)
         json.NewEncoder(w).Encode(map[string]string{"shortcode": link.Shortcode})
-    }
+    })
 }
 
 // RedirectHandler handles GET /{shortcode}
-func RedirectHandler(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
+func RedirectHandler(db *sql.DB) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.NotFound(w, r)
+            return
+        }
         code := strings.TrimPrefix(r.URL.Path, "/")
         if code == "" {
             http.NotFound(w, r)
@@ -57,12 +66,16 @@ func RedirectHandler(db *sql.DB) http.HandlerFunc {
 
         _ = service.IncrementHits(db, code)
         http.Redirect(w, r, link.TargetURL, http.StatusFound)
-    }
+    })
 }
 
 // RevokeHandler handles DELETE /{shortcode}
-func RevokeHandler(db *sql.DB, apiKeys []string) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
+func RevokeHandler(db *sql.DB, apiKeys []string) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodDelete {
+            http.NotFound(w, r)
+            return
+        }
         apiKey := r.Header.Get("X-API-Key")
         if !contains(apiKeys, apiKey) {
             http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -81,12 +94,16 @@ func RevokeHandler(db *sql.DB, apiKeys []string) http.HandlerFunc {
         }
 
         w.WriteHeader(http.StatusNoContent)
-    }
+    })
 }
 
 // MetricsHandler handles GET /metrics
-func MetricsHandler(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
+func MetricsHandler(db *sql.DB) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.NotFound(w, r)
+            return
+        }
         w.Header().Set("Content-Type", "application/json")
         metrics, err := telemetry.GetMetrics(db)
         if err != nil {
@@ -94,13 +111,13 @@ func MetricsHandler(db *sql.DB) http.HandlerFunc {
             return
         }
         json.NewEncoder(w).Encode(metrics)
-    }
+    })
 }
 
 // HealthHandler handles GET /health
-func HealthHandler() http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
+func HealthHandler() http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "application/json")
         json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-    }
+    })
 }

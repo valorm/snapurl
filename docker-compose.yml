@@ -1,0 +1,30 @@
+services:
+  snapurl:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - snapurl_data:/data
+      - ./config:/config         # ✅ Add this to fix the crash
+    environment:
+      - PORT=:8080
+      - DB_PATH=/data/snapurl.db
+      - RATE_LIMIT=100
+      - API_KEYS=default_key_1
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - snapurl
+
+volumes:
+  snapurl_data:
+  caddy_data:
+  caddy_config:

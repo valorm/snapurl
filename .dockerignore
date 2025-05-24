@@ -1,0 +1,36 @@
+**/.git
+**/*.md
+**/test
+data/*
+.env
+*.log
+*.DS_Store
+# Git files
+.git
+.gitignore
+
+# Development files
+*.log
+.env
+.vscode
+.idea
+
+# Build artifacts (but keep vendor)
+# vendor - DO NOT ignore this since we need it
+bin/
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+*_test.go
+test/
+
+# Documentation
+docs/
+*.md
+
+# Make sure vendor directory is NOT ignored - we need it!
+# vendor/
