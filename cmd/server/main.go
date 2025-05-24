@@ -31,18 +31,20 @@ func main() {
 
     // Build router
     mux := http.NewServeMux()
+
+    // Public endpoints
     mux.Handle("/shorten", api.ShortenHandler(db))
     mux.Handle("/{shortcode}", api.RedirectHandler(db))
-    mux.Handle("/"+cfg.APIKeys[0], api.RevokeHandler(db, cfg.APIKeys)) // pattern; see note below
     mux.Handle("/health", api.HealthHandler())
     mux.Handle("/metrics", api.MetricsHandler(db))
 
-    // Apply middleware stack: recovery → logging → auth → rate limit
+    // Protected endpoint with authentication middleware
+    mux.Handle("/"+cfg.APIKeys[0], api.AuthMiddleware(cfg, api.RevokeHandler(db, cfg.APIKeys)))
+
+    // Apply middleware: recovery → logging → rate limiting
     handler := rateLimiter.Middleware(
         api.RecoveryMiddleware(
-            api.LoggingMiddleware(
-                api.AuthMiddleware(cfg, mux),
-            ),
+            api.LoggingMiddleware(mux),
         ),
     )
 
