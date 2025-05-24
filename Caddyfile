@@ -1,0 +1,4 @@
+# Caddyfile – reverse‐proxy snapurl service
+snapurl.localhost {
+    reverse_proxy snapurl:8080
+}
