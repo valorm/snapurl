@@ -22,6 +22,7 @@ FROM alpine:latest
 RUN apk add --no-cache sqlite-libs
 WORKDIR /
 COPY --from=builder /snapurl /snapurl
+COPY --from=builder /app/public /public
 # Don't copy config - it will be mounted as volume in docker-compose
 # Create directories that might be needed
 RUN mkdir -p /config /data
